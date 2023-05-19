@@ -7,7 +7,7 @@
 
 
 dotfiles="https://github.com/danpellegrino/ArtixRice.git"
-aurhelper="yay"
+aurhelper="paru"
 repobranch="main"
 export TERM=ansi
 
