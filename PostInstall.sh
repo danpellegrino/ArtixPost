@@ -7,6 +7,7 @@
 
 
 dotfiles="https://github.com/danpellegrino/ArtixRice.git"
+progsfile=""
 aurhelper="paru"
 repobranch="main"
 export TERM=ansi
@@ -122,6 +123,24 @@ manualinstall() {
 		makepkg --noconfirm -si >/dev/null 2>&1 || return 1
 }
 
+installationloop() {
+	([ -f "$progsfile" ] && cp "$progsfile" /tmp/progs.csv) ||
+		curl -Ls "$progsfile" | sed '/^#/d' >/tmp/progs.csv
+	total=$(wc -l </tmp/progs.csv)
+	aurinstalled=$(pacman -Qqm)
+	while IFS=, read -r tag program comment; do
+		n=$((n + 1))
+		echo "$comment" | grep -q "^\".*\"$" &&
+			comment="$(echo "$comment" | sed -E "s/(^\"|\"$)//g")"
+		case "$tag" in
+		"A") aurinstall "$program" "$comment" ;;
+		"G") gitmakeinstall "$program" "$comment" ;;
+		"P") pipinstall "$program" "$comment" ;;
+		*) maininstall "$program" "$comment" ;;
+		esac
+	done </tmp/progs.csv
+}
+
 
 pacman --noconfirm --needed -Sy libnewt ||
 	error "Are you sure you're running this as the root user, are on an Arch-based distribution and have an internet connection?"
@@ -171,3 +190,9 @@ sed -Ei "s/^#(ParallelDownloads).*/\1 = 5/;/^#Color$/s/#//" /etc/pacman.conf
 sed -i "s/-j2/-j$(nproc)/;/^#MAKEFLAGS/s/^#//" /etc/makepkg.conf
 
 manualinstall $aurhelper || error "Failed to install AUR helper."
+
+# The command that does all the installing. Reads the progs.csv file and
+# installs each needed program the way required. Be sure to run this only after
+# the user has been created and has priviledges to run sudo without a password
+# and all build dependencies are installed.
+installationloop
