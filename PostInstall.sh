@@ -170,4 +170,4 @@ sed -Ei "s/^#(ParallelDownloads).*/\1 = 5/;/^#Color$/s/#//" /etc/pacman.conf
 # Use all cores for compilation.
 sed -i "s/-j2/-j$(nproc)/;/^#MAKEFLAGS/s/^#//" /etc/makepkg.conf
 
-manualinstall yay || error "Failed to install AUR helper."
+manualinstall $aurhelper || error "Failed to install AUR helper."
