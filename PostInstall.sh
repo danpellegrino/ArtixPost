@@ -12,6 +12,7 @@ aurhelper="paru"
 repobranch="main"
 export TERM=ansi
 
+### FUNCTIONS ###
 
 installpkg() {
 	pacman --noconfirm --needed -S "$1" >/dev/null 2>&1
@@ -25,7 +26,7 @@ error() {
 
 welcomemsg() {
 	whiptail --title "Welcome!" \
-		--msgbox "Welcome to Daniel's Auto-Rice Bootstrapping Script!\\n\\nThis script will automatically install a fully-featured Linux desktop, which I use on my laptop.\\n\\n-Daniel" 10 60
+		--msgbox "Welcome to Luke's Auto-Rice Bootstrapping Script!\\n\\nThis script will automatically install a fully-featured Linux desktop, which I use as my main machine.\\n\\n-Luke" 10 60
 
 	whiptail --title "Important Note!" --yes-button "All ready!" \
 		--no-button "Return..." \
@@ -51,7 +52,7 @@ usercheck() {
 	! { id -u "$name" >/dev/null 2>&1; } ||
 		whiptail --title "WARNING" --yes-button "CONTINUE" \
 			--no-button "No wait..." \
-			--yesno "The user \`$name\` already exists on this system. This script can install for a user already existing, but it will OVERWRITE any conflicting settings/dotfiles on the user account.\\n\\nThis script will NOT overwrite your user files, documents, videos, etc., so don't worry about that, but only click <CONTINUE> if you don't mind your settings being overwritten.\\n\\nNote also that this script will change $name's password to the one you just gave." 14 70
+			--yesno "The user \`$name\` already exists on this system. LARBS can install for a user already existing, but it will OVERWRITE any conflicting settings/dotfiles on the user account.\\n\\nLARBS will NOT overwrite your user files, documents, videos, etc., so don't worry about that, but only click <CONTINUE> if you don't mind your settings being overwritten.\\n\\nNote also that LARBS will change $name's password to the one you just gave." 14 70
 }
 
 preinstallmsg() {
@@ -61,6 +62,18 @@ preinstallmsg() {
 		clear
 		exit 1
 	}
+}
+
+adduserandpass() {
+	# Adds user `$name` with password $pass1.
+	whiptail --infobox "Adding user \"$name\"..." 7 50
+	useradd -m -g wheel -s /bin/zsh "$name" >/dev/null 2>&1 ||
+		usermod -a -G wheel "$name" && mkdir -p /home/"$name" && chown "$name":wheel /home/"$name"
+	export repodir="/home/$name/.local/src"
+	mkdir -p "$repodir"
+	chown -R "$name":wheel "$(dirname "$repodir")"
+	echo "$name:$pass1" | chpasswd
+	unset pass1 pass2
 }
 
 refreshkeys() {
@@ -92,18 +105,6 @@ Include = /etc/pacman.d/mirrorlist-arch" >>/etc/pacman.conf
 		pacman-key --populate archlinux >/dev/null 2>&1
 		;;
 	esac
-}
-
-adduserandpass() {
-	# Adds user `$name` with password $pass1.
-	whiptail --infobox "Adding user \"$name\"..." 7 50
-	useradd -m -g wheel -s /bin/zsh "$name" >/dev/null 2>&1 ||
-		usermod -a -G wheel "$name" && mkdir -p /home/"$name" && chown "$name":wheel /home/"$name"
-	export repodir="/home/$name/.local/src"
-	mkdir -p "$repodir"
-	chown -R "$name":wheel "$(dirname "$repodir")"
-	echo "$name:$pass1" | chpasswd
-	unset pass1 pass2
 }
 
 manualinstall() {
@@ -179,7 +180,88 @@ installationloop() {
 	done </tmp/progs.csv
 }
 
+putgitrepo() {
+	# Downloads a gitrepo $1 and places the files in $2 only overwriting conflicts
+	whiptail --infobox "Downloading and installing config files..." 7 60
+	[ -z "$3" ] && branch="master" || branch="$repobranch"
+	dir=$(mktemp -d)
+	[ ! -d "$2" ] && mkdir -p "$2"
+	chown "$name":wheel "$dir" "$2"
+	sudo -u "$name" git -C "$repodir" clone --depth 1 \
+		--single-branch --no-tags -q --recursive -b "$branch" \
+		--recurse-submodules "$1" "$dir"
+	sudo -u "$name" cp -rfT "$dir" "$2"
+}
 
+vimplugininstall() {
+	# TODO remove shortcuts error message
+	# Installs vim plugins.
+	whiptail --infobox "Installing neovim plugins..." 7 60
+	mkdir -p "/home/$name/.config/nvim/autoload"
+	curl -Ls "https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim" >  "/home/$name/.config/nvim/autoload/plug.vim"
+	chown -R "$name:wheel" "/home/$name/.config/nvim"
+	sudo -u "$name" nvim -c "PlugInstall|q|q"
+}
+
+makeuserjs(){
+	# Get the Arkenfox user.js and prepare it.
+	arkenfox="$pdir/arkenfox.js"
+	overrides="$pdir/user-overrides.js"
+	userjs="$pdir/user.js"
+	ln -fs "/home/$name/.config/firefox/larbs.js" "$overrides"
+	[ ! -f "$arkenfox" ] && curl -sL "https://raw.githubusercontent.com/arkenfox/user.js/master/user.js" > "$arkenfox"
+	cat "$arkenfox" "$overrides" > "$userjs"
+	chown "$name:wheel" "$arkenfox" "$userjs"
+	# Install the updating script.
+	mkdir -p /usr/local/lib /etc/pacman.d/hooks
+	cp "/home/$name/.local/bin/arkenfox-auto-update" /usr/local/lib/
+	chown root:root /usr/local/lib/arkenfox-auto-update
+	chmod 755 /usr/local/lib/arkenfox-auto-update
+	# Trigger the update when needed via a pacman hook.
+	echo "[Trigger]
+Operation = Upgrade
+Type = Package
+Target = firefox
+Target = librewolf
+Target = librewolf-bin
+[Action]
+Description=Update Arkenfox user.js
+When=PostTransaction
+Depends=arkenfox-user.js
+Exec=/usr/local/lib/arkenfox-auto-update" > /etc/pacman.d/hooks/arkenfox.hook
+}
+
+installffaddons(){
+	addonlist="ublock-origin decentraleyes istilldontcareaboutcookies vim-vixen"
+	addontmp="$(mktemp -d)"
+	trap "rm -fr $addontmp" HUP INT QUIT TERM PWR EXIT
+	IFS=' '
+	sudo -u "$name" mkdir -p "$pdir/extensions/"
+	for addon in $addonlist; do
+		addonurl="$(curl --silent "https://addons.mozilla.org/en-US/firefox/addon/${addon}/" | grep -o 'https://addons.mozilla.org/firefox/downloads/file/[^"]*')"
+		file="${addonurl##*/}"
+		sudo -u "$name" curl -LOs "$addonurl" > "$addontmp/$file"
+		id="$(unzip -p "$file" manifest.json | grep "\"id\"")"
+		id="${id%\"*}"
+		id="${id##*\"}"
+		sudo -u "$name" mv "$file" "$pdir/extensions/$id.xpi"
+	done
+	# Fix a Vim Vixen bug with dark mode not fixed on upstream:
+	sudo -u "$name" mkdir -p "$pdir/chrome"
+	[ ! -f  "$pdir/chrome/userContent.css" ] && sudo -u "$name" echo ".vimvixen-console-frame { color-scheme: light !important; }
+#category-more-from-mozilla { display: none !important }" > "$pdir/chrome/userContent.css"
+}
+
+finalize() {
+	whiptail --title "All done!" \
+		--msgbox "Congrats! Provided there were no hidden errors, the script completed successfully and all the programs and configuration files should be in place.\\n\\nTo run the new graphical environment, log out and log back in as your new user, then run the command \"startx\" to start the graphical environment (it will start automatically in tty1).\\n\\n.t Luke" 13 80
+}
+
+### THE ACTUAL SCRIPT ###
+
+### This is how everything happens in an intuitive format and order.
+
+# Check if user is root on Arch distro. Install whiptail.
 pacman --noconfirm --needed -Sy libnewt ||
 	error "Are you sure you're running this as the root user, are on an Arch-based distribution and have an internet connection?"
 
@@ -202,12 +284,12 @@ refreshkeys ||
 	error "Error automatically refreshing Arch keyring. Consider doing so manually."
 
 for x in curl ca-certificates base-devel git ntp zsh; do
-	whiptail --title "Installation" \
+	whiptail --title "LARBS Installation" \
 		--infobox "Installing \`$x\` which is required to install and configure other programs." 8 70
 	installpkg "$x"
 done
 
-whiptail --title "Installation" \
+whiptail --title "LARBS Installation" \
 	--infobox "Synchronizing system time to ensure successful and secure installation of software..." 8 70
 ntpd -q -g >/dev/null 2>&1
 
@@ -217,8 +299,8 @@ adduserandpass || error "Error adding username and/or password."
 
 # Allow user to run sudo without password. Since AUR programs must be installed
 # in a fakeroot environment, this is required for all builds with AUR.
-trap 'rm -f /etc/sudoers.d/user-temp' HUP INT QUIT TERM PWR EXIT
-echo "%wheel ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/user-temp
+trap 'rm -f /etc/sudoers.d/larbs-temp' HUP INT QUIT TERM PWR EXIT
+echo "%wheel ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/larbs-temp
 
 # Make pacman colorful, concurrent downloads and Pacman eye-candy.
 grep -q "ILoveCandy" /etc/pacman.conf || sed -i "/#VerbosePkgLists/a ILoveCandy" /etc/pacman.conf
@@ -227,10 +309,11 @@ sed -Ei "s/^#(ParallelDownloads).*/\1 = 5/;/^#Color$/s/#//" /etc/pacman.conf
 # Use all cores for compilation.
 sed -i "s/-j2/-j$(nproc)/;/^#MAKEFLAGS/s/^#//" /etc/makepkg.conf
 
-manualinstall $aurhelper || error "Failed to install AUR helper."
+manualinstall $(aurhelper) || error "Failed to install AUR helper."
 
 # The command that does all the installing. Reads the progs.csv file and
 # installs each needed program the way required. Be sure to run this only after
 # the user has been created and has priviledges to run sudo without a password
 # and all build dependencies are installed.
 installationloop
+
