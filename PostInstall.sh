@@ -7,7 +7,7 @@
 
 
 dotfiles="https://github.com/danpellegrino/ArtixRice.git"
-progsfile="https://raw.githubusercontent.com/danpellegrino/ArtixPost/main/progs.csv?token=GHSAT0AAAAAACC2ZLRWPTZK56QFG7FCEBZWZDHEV7A"
+progsfile="https://raw.githubusercontent.com/danpellegrino/ArtixPost/main/progs.csv?token=GHSAT0AAAAAACC2ZLRWFMHFZK563ENUSIGEZDIGSZQ"
 aurhelper="paru"
 repobranch="main"
 export TERM=ansi
