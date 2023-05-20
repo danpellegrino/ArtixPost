@@ -232,7 +232,7 @@ Exec=/usr/local/lib/arkenfox-auto-update" > /etc/pacman.d/hooks/arkenfox.hook
 }
 
 installffaddons(){
-	addonlist="ublock-origin decentraleyes istilldontcareaboutcookies vim-vixen"
+	addonlist="ublock-origin decentraleyes istilldontcareaboutcookies vim-vixen darkreader humble-new-tab return-youtube-dislikes youtube-recommended-videos"
 	addontmp="$(mktemp -d)"
 	trap "rm -fr $addontmp" HUP INT QUIT TERM PWR EXIT
 	IFS=' '
@@ -317,3 +317,67 @@ manualinstall $aurhelper || error "Failed to install AUR helper."
 # and all build dependencies are installed.
 installationloop
 
+# Install the dotfiles in the user's home directory, but remove .git dir and
+# other unnecessary files.
+putgitrepo "$dotfilesrepo" "/home/$name" "$repobranch"
+rm -rf "/home/$name/.git/" "/home/$name/README.md" "/home/$name/LICENSE"
+
+# Install vim plugins if not already present.
+[ ! -f "/home/$name/.config/nvim/autoload/plug.vim" ] && vimplugininstall
+
+# Most important command! Get rid of the beep!
+rmmod pcspkr
+echo "blacklist pcspkr" >/etc/modprobe.d/nobeep.conf
+
+# Make zsh the default shell for the user.
+chsh -s /bin/zsh "$name" >/dev/null 2>&1
+sudo -u "$name" mkdir -p "/home/$name/.cache/zsh/"
+sudo -u "$name" mkdir -p "/home/$name/.config/abook/"
+sudo -u "$name" mkdir -p "/home/$name/.config/mpd/playlists/"
+
+# dbus UUID must be generated for Artix runit.
+dbus-uuidgen >/var/lib/dbus/machine-id
+
+# Use system notifications for Brave on Artix
+echo "export \$(dbus-launch)" >/etc/profile.d/dbus.sh
+
+# Enable tap to click
+[ ! -f /etc/X11/xorg.conf.d/40-libinput.conf ] && printf 'Section "InputClass"
+        Identifier "libinput touchpad catchall"
+        MatchIsTouchpad "on"
+        MatchDevicePath "/dev/input/event*"
+        Driver "libinput"
+	# Enable left mouse button by tapping
+	Option "Tapping" "on"
+EndSection' >/etc/X11/xorg.conf.d/40-libinput.conf
+
+# All this below to get Librewolf installed with add-ons and non-bad settings.
+
+whiptail --infobox "Setting browser privacy settings and add-ons..." 7 60
+
+browserdir="/home/$name/.librewolf"
+profilesini="$browserdir/profiles.ini"
+
+# Start librewolf headless so it generates a profile. Then get that profile in a variable.
+sudo -u "$name" librewolf --headless >/dev/null 2>&1 &
+sleep 1
+profile="$(sed -n "/Default=.*.default-release/ s/.*=//p" "$profilesini")"
+pdir="$browserdir/$profile"
+
+[ -d "$pdir" ] && makeuserjs
+
+[ -d "$pdir" ] && installffaddons
+
+# Kill the now unnecessary librewolf instance.
+pkill -u "$name" librewolf
+
+# Allow wheel users to sudo with password and allow several system commands
+# (like `shutdown` to run without password).
+echo "%wheel ALL=(ALL:ALL) ALL" >/etc/sudoers.d/00-larbs-wheel-can-sudo
+echo "%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/shutdown,/usr/bin/reboot,/usr/bin/systemctl suspend,/usr/bin/wifi-menu,/usr/bin/mount,/usr/bin/umount,/usr/bin/pacman -Syu,/usr/bin/pacman -Syyu,/usr/bin/pacman -Syyu --noconfirm,/usr/bin/loadkeys,/usr/bin/pacman -Syyuw --noconfirm,/usr/bin/pacman -S -u -y --config /etc/pacman.conf --,/usr/bin/pacman -S -y -u --config /etc/pacman.conf --" >/etc/sudoers.d/01-larbs-cmds-without-password
+echo "Defaults editor=/usr/bin/nvim" >/etc/sudoers.d/02-larbs-visudo-editor
+mkdir -p /etc/sysctl.d
+echo "kernel.dmesg_restrict = 0" > /etc/sysctl.d/dmesg.conf
+
+# Last message! Install complete!
+finalize
