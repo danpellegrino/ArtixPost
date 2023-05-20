@@ -141,6 +141,44 @@ installationloop() {
 	done </tmp/progs.csv
 }
 
+aurinstall() {
+	whiptail --title "LARBS Installation" \
+		--infobox "Installing \`$1\` ($n of $total) from the AUR. $1 $2" 9 70
+	echo "$aurinstalled" | grep -q "^$1$" && return 1
+	sudo -u "$name" $aurhelper -S --noconfirm "$1" >/dev/null 2>&1
+}
+
+gitmakeinstall() {
+	progname="${1##*/}"
+	progname="${progname%.git}"
+	dir="$repodir/$progname"
+	whiptail --title "LARBS Installation" \
+		--infobox "Installing \`$progname\` ($n of $total) via \`git\` and \`make\`. $(basename "$1") $2" 8 70
+	sudo -u "$name" git -C "$repodir" clone --depth 1 --single-branch \
+		--no-tags -q "$1" "$dir" ||
+		{
+			cd "$dir" || return 1
+			sudo -u "$name" git pull --force origin master
+		}
+	cd "$dir" || exit 1
+	make >/dev/null 2>&1
+	make install >/dev/null 2>&1
+	cd /tmp || return 1
+}
+
+pipinstall() {
+	whiptail --title "LARBS Installation" \
+		--infobox "Installing the Python package \`$1\` ($n of $total). $1 $2" 9 70
+	[ -x "$(command -v "pip")" ] || installpkg python-pip >/dev/null 2>&1
+	yes | pip install "$1"
+}
+
+maininstall() {
+	# Installs all needed programs from main repo.
+	whiptail --title "LARBS Installation" --infobox "Installing \`$1\` ($n of $total). $1 $2" 9 70
+	installpkg "$1"
+}
+
 
 pacman --noconfirm --needed -Sy libnewt ||
 	error "Are you sure you're running this as the root user, are on an Arch-based distribution and have an internet connection?"
